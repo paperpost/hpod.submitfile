@@ -12,5 +12,10 @@ Command-line Parameters
     -u   The submitting user's email address
     -p   The submitting user's password
 
+For example:
+
+```
+hpod-submitfile -i "test.h-pod.co.uk" -f "C:\file.pdf" -o "C:\options.json" -a myaccount -u test@test.com -p mypassword
+```
 
 Documentation on the H-POD API can be found at https://apidocs.h-pod.co.uk/
