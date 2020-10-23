@@ -73,7 +73,7 @@ namespace SubmitFile {
 		private static async Task<int> SubmitDocument(Options O) {
 			using (HttpClient client = new HttpClient())
 			{
-				client.BaseAddress = new Uri(string.Format("https://{0}/api/v3/", O.instance));
+				client.BaseAddress = new Uri(string.Format("https://{0}/api/v2/", O.instance));
 
 				JObject oAuth = JObject.FromObject(new {
 						accountLogin = O.accountLogin,
@@ -187,9 +187,6 @@ namespace SubmitFile {
 					Console.WriteLine("Failed");
 				}
 			}
-
-			Console.WriteLine("Press enter to exit");
-			Console.ReadLine();
 
 			return 0;
 		}
