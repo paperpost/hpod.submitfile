@@ -7,6 +7,11 @@ using System.Threading.Tasks;
 
 namespace SubmitFile {
 	class Program {
+		private class APIResult {
+			public System.Net.HttpStatusCode StatusCode;
+			public string Response;
+		}
+
 		class Options {
 			[Option('i', Required=true, HelpText="The DNS name for your H-POD instance")]
 			public string instance { get; set; }
@@ -35,29 +40,31 @@ namespace SubmitFile {
 		}
 
 		// Post with throttling retries
-		private static async Task<HttpResponseMessage> CallWithRetryAsync(HttpClient client, string URL, HttpContent content, bool Post) {
+		private static async Task<APIResult> CallWithRetryAsync(HttpClient client, string URL, HttpContent content, bool Post) {
 			bool complete=false;
 			int RetryInterval = 1000;
-			HttpResponseMessage result = null;
+			HttpResponseMessage response = null;
+			APIResult result = new APIResult();
 
 			while(!complete) {
 				if(Post) {
-					result = await client.PostAsync(URL, content, System.Threading.CancellationToken.None).ConfigureAwait(false);
+					response = await client.PostAsync(URL, content, System.Threading.CancellationToken.None).ConfigureAwait(false);
 				} else {
-					result = await client.GetAsync(URL, System.Threading.CancellationToken.None).ConfigureAwait(false);
+					response = await client.GetAsync(URL, System.Threading.CancellationToken.None).ConfigureAwait(false);
 				}
 
-				var response = await result.Content.ReadAsStringAsync().ConfigureAwait(false);
+				result.Response = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 				bool throttled = false;
 
-				if(result.StatusCode == System.Net.HttpStatusCode.OK) {
-					var jResponse = JObject.Parse(response);
-
-					throttled = ((string)jResponse["result"]["code"]=="429");
+				switch(result.StatusCode) {
+					case System.Net.HttpStatusCode.OK:
+						var jResponse = JObject.Parse(result.Response);
+						
+						result.StatusCode = (System.Net.HttpStatusCode)int.Parse((string)jResponse["result"]["code"]);
+						break;
 				}
 
-				if(result.StatusCode == (System.Net.HttpStatusCode)429)
-					throttled = true;
+				throttled = (result.StatusCode == System.Net.HttpStatusCode.TooManyRequests);
 
 				if(throttled) {
 					System.Threading.Thread.Sleep(RetryInterval);
@@ -89,12 +96,10 @@ namespace SubmitFile {
 																  System.Text.Encoding.UTF8,
 																  "application/json"), true).ConfigureAwait(false);
 
-				string authResponse = await result.Content.ReadAsStringAsync().ConfigureAwait(false);
-
 				if(result.StatusCode == System.Net.HttpStatusCode.OK) {
 					Console.WriteLine("OK");
 
-					var response = Newtonsoft.Json.JsonConvert.DeserializeAnonymousType(authResponse, new { token = "" });
+					var response = Newtonsoft.Json.JsonConvert.DeserializeAnonymousType(result.Response, new { token = "" });
 
 					client.DefaultRequestHeaders.Add("Authorization", "Bearer "+response.token);
 
@@ -108,10 +113,8 @@ namespace SubmitFile {
 					result = await CallWithRetryAsync(client, "print/init",
 									new System.Net.Http.StringContent(opts, System.Text.Encoding.UTF8, "application/json"), true).ConfigureAwait(false);
 
-					string initResponse = await result.Content.ReadAsStringAsync().ConfigureAwait(false);
-
 					if(result.StatusCode == System.Net.HttpStatusCode.OK) {
-						JObject jResponse = JObject.Parse(initResponse);
+						JObject jResponse = JObject.Parse(result.Response);
 
 						Guid JobGUID = Guid.Parse((string)jResponse["jobGuid"]);
 
@@ -155,23 +158,14 @@ namespace SubmitFile {
 
 								if(CommitResult.StatusCode == System.Net.HttpStatusCode.OK) {
 									Console.WriteLine("OK");
-									bool committed = false;
 
 									Console.Write("Validating receipt of submission...");
-									while(!committed) {
-										result = await CallWithRetryAsync(client, "print/committed", null, false).ConfigureAwait(false);
+									result = await CallWithRetryAsync(client, "print/committed", null, false).ConfigureAwait(false);
 
-										jResponse = JObject.Parse(await result.Content.ReadAsStringAsync());
-
-										committed = (string)jResponse["result"]["code"]=="200";
-
-										if(!committed) {
-											System.Threading.Thread.Sleep(500);
-											Console.Write("[retry] ");
-										}
-									}
-
-									Console.WriteLine("OK");
+									if(result.StatusCode != System.Net.HttpStatusCode.OK) {
+										Console.WriteLine("Failed");
+									} else
+										Console.WriteLine("OK");
 								} else {
 									Console.WriteLine("Failed to commit print job");
 								}
@@ -181,7 +175,7 @@ namespace SubmitFile {
 						}
 					} else {
 						Console.WriteLine("Failed");
-						Console.WriteLine(initResponse);
+						Console.WriteLine(result.Response);
 					}
 				} else {
 					Console.WriteLine("Failed");
@@ -222,16 +216,14 @@ namespace SubmitFile {
 
 					var result = await CallWithRetryAsync(client, endpoint, content, true).ConfigureAwait(false);
 
-					string response = await result.Content.ReadAsStringAsync().ConfigureAwait(false);
+					if(result.StatusCode == System.Net.HttpStatusCode.OK) {
+						JObject jDocPartResponse = JObject.Parse(result.Response);
 
-					JObject jDocPartResponse = JObject.Parse(response);
-
-					if((int)jDocPartResponse["result"]["code"]!=200) {
-						throw new Exception(string.Format(" /// Failed to send part to {0}\r\n{1}", endpoint, response));
-					} else {
 						totalRead += read;
+
 						Console.Write("\rSent [{0}/{1}] bytes ", totalRead, fs.Length);
-					}
+					} else
+						throw new Exception(string.Format(" /// Failed to send part to {0}\r\n{1}", endpoint, result.Response));
 
 					partindex++;
 				}
