@@ -56,15 +56,20 @@ namespace SubmitFile {
 				result.Response = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 				bool throttled = false;
 
-				switch(result.StatusCode) {
+				switch(response.StatusCode) {
 					case System.Net.HttpStatusCode.OK:
 						var jResponse = JObject.Parse(result.Response);
 						
+						// If the API 
 						result.StatusCode = (System.Net.HttpStatusCode)int.Parse((string)jResponse["result"]["code"]);
+						break;
+					case System.Net.HttpStatusCode.TooManyRequests:
+						throttled=true;
 						break;
 				}
 
-				throttled = (result.StatusCode == System.Net.HttpStatusCode.TooManyRequests);
+				if(!throttled)
+					throttled = (result.StatusCode == System.Net.HttpStatusCode.TooManyRequests);
 
 				if(throttled) {
 					System.Threading.Thread.Sleep(RetryInterval);
@@ -187,7 +192,6 @@ namespace SubmitFile {
 
 		private static async Task<bool> SendFileAsync(HttpClient client, string endpoint, string path, int index) {
 			try {
-				// print/docpart
 				int partSize = 2000;
 				int totalRead = 0;
 				int partindex = 0;
